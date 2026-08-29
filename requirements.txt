@@ -1,0 +1,15 @@
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.36.0        # CLIP (ViT-B/16) via HuggingFace
+ftfy
+regex
+Pillow
+numpy
+pandas
+scikit-learn
+scipy
+tqdm
+matplotlib
+jieba                       # Chinese tokenization / cleaning for Weibo text
+opencv-python                # LSH-based near-duplicate image filtering (Weibo preprocessing)
+imagehash                   # perceptual hashing, used as an LSH stand-in for de-duplication

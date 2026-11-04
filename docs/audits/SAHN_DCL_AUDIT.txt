@@ -1,0 +1,96 @@
+================================================================================
+                    PHASE 0: SAHN-DCL REPOSITORY & DATASET AUDIT
+================================================================================
+Generated on: 2026-10-21
+Workspace: /DATA/raghvendra3088/MFND_project/files/
+Environment: /DATA/raghvendra3088/MFND_env/bin/python (PyTorch 2.5.1+cu121)
+
+1. REPOSITORY STRUCTURE & CODE FACTS
+--------------------------------------------------------------------------------
+- Entry points:
+  * train.py: Original baseline training script.
+  * phase0_runner.py: Multi-seed harness for Baseline V2 (M0) and Clean Baseline (M0a).
+  * train_cfcai.py: Training script for CFCA-I ablation ladder (M2-M6, M5a).
+- Core model files:
+  * model.py: Defines MFND_DCL (1,464,194 parameters).
+  * cfca_modules.py: Defines CFCAI (1,607,493 parameters) with token/patch cross-attention.
+  * dcl_losses.py: SupConLoss and MultimodalConsistencyLoss.
+- Dataset files:
+  * ../data/weibo/weibo_train.csv (7,531 samples)
+  * ../data/weibo/weibo_test.csv (1,996 samples)
+  * ../data/weibo/tokens/train/ (text.npy, text_mask.npy, patch.npy, meta.npy, labels.npy)
+  * ../data/weibo/tokens/test/ (text.npy, text_mask.npy, patch.npy, meta.npy, labels.npy)
+
+2. TENSOR DIMENSIONS & FORWARD PASS SIGNATURES
+--------------------------------------------------------------------------------
+A. MFND_DCL (Baseline):
+- Inputs:
+  * text_feat: [B, 1026] (1024-d Chinese-CLIP text embedding + 2-d timestamp sin/cos)
+  * image_feat: [B, 1026] (1024-d Chinese-CLIP visual embedding + 2-d timestamp sin/cos)
+- Encoders / Bottlenecks:
+  * text_linear: 1026 -> 128
+  * image_linear: 1026 -> 128
+- Intermediate Representations:
+  * user_repr: [B, 128] (Sample-level representation, fused text + image)
+  * text_consist_repr: [B, 128] (Modality-level text representation)
+  * image_consist_repr: [B, 128] (Modality-level visual representation)
+  * fused: [B, 256] (Concatenation of attended text and visual vectors)
+- Output:
+  * logits: [B, 2] (Class 0: Real, Class 1: Fake)
+
+B. CFCAI (Fine-Grained):
+- Inputs:
+  * text_tok: [B, 64, 1024] (L=64 text tokens)
+  * text_mask: [B, 64] (bool, True for real token, False for padding)
+  * patch_tok: [B, 49, 1024] (7x7=49 image patches)
+  * meta: [B, 2] (Optional 2-d temporal metadata)
+- Output:
+  * z_sample: [B, 128]
+  * z_text: [B, 128]
+  * z_image: [B, 128]
+  * S: [B, B] fine-grained token-to-patch alignment matrix
+  * a: [B, 64] text claim importance weights (sum=1.0)
+  * b: [B, 49] image region importance weights (sum=1.0)
+  * logits: [B, 2]
+
+3. LOSS EQUATIONS AS IMPLEMENTED IN CODE
+--------------------------------------------------------------------------------
+A. Existing Sample-level SupConLoss:
+- Anchor: user_repr [B, 128]
+- Mask: positive_mask[i, j] = 1 if label[i] == label[j] and i != j
+- Loss:
+  L_sup = - (1 / |P(i)|) * sum_{p in P(i)} log( exp(sim(z_i, z_p)/tau) / sum_{a != i} exp(sim(z_i, z_a)/tau) )
+
+B. Existing Modality-level MultimodalConsistencyLoss:
+- Anchors: text_feat [B, 128], image_feat [B, 128]
+- Positive: Paired post text_i and image_i (diagonal i == j)
+- Negatives: Off-diagonal cross-modal pairs (i != j)
+- Loss:
+  L_modal = 0.5 * ( CrossEntropy(text @ image.T / tau, diag_labels) + CrossEntropy(image @ text.T / tau, diag_labels) )
+
+4. DATASET SCHEMA & METADATA FACTS
+--------------------------------------------------------------------------------
+- Columns in weibo_train.csv / weibo_test.csv:
+  ['post_id', 'text', 'image_path', 'label', 'timestamp']
+- Label encoding:
+  0 = Non-rumor (Real news)
+  1 = Rumor (Fake news)
+- Pair-level match label:
+  DOES NOT EXIST. The dataset does NOT provide an independent annotation of whether 
+  the image correctly matches the text claim.
+  * Fact: We CANNOT assume fake news = mismatched image.
+  * Fact: We CANNOT assume real news = 100% matched image.
+  * Rule: Off-diagonal pairs in a batch are unverified negatives, NOT ground-truth mismatches.
+
+5. IDENTIFIED LIMITATIONS & SAHN-DCL OPPORTUNITIES
+--------------------------------------------------------------------------------
+1. Modality loss treats ALL off-diagonal image-text pairs as negative:
+   If two real posts talk about the same event (e.g. earthquake), their images are treated 
+   as negatives, causing false-negative penalties.
+2. Hard-negative mining in previous version (Novelty 1) penalized top-k negatives blindly:
+   Without checking semantic ambiguity, ambiguous pairs distorted the latent space.
+3. SAHN-DCL Solution:
+   - Construct valid negative mask excluding diagonal and high-overlap pairs.
+   - Calculate semantic ambiguity proxy A_ij to downweight uncertain negatives.
+   - Bounded weighting rule prevents gradient explosion / numerical instability.
+================================================================================

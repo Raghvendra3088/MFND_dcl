@@ -1,0 +1,31 @@
+====================================================================================================
+       SAHN-DCL RIGOROUS EXPERIMENTAL EVALUATION RESULTS (WEIBO DATASET)
+====================================================================================================
+Evaluation Protocol: 5 Random Seeds [42, 123, 129, 2024, 3407] | 90/10 Val Split | Test N=1996
+
+TABLE 1: MAIN RESULTS & ARCHITECTURE COMPARISON (MEAN ± SAMPLE STD)
+----------------------------------------------------------------------------------------------------
+Model / Experiment                         | Accuracy (%)     | Macro F1 (%)     | McNemar vs E0     
+----------------------------------------------------------------------------------------------------
+MFND-DCL Baseline (Paper Arch + Meta)      | 96.45 ± 0.20     | 96.45 ± 0.20     | Baseline (Ref)    
+MFND-DCL Clean Baseline (No Meta)          | 88.74 ± 0.48     | 88.73 ± 0.48     | p=0.00e+00 ***    
+E4: Combined SAHN-DCL (Sample + Modal, beta=0) | 96.29 ± 0.28     | 96.29 ± 0.28     | p=3.16e-01 n.s.   
+E5: Full SAHN-DCL + Ambiguity Proxy (beta=0.5) | 96.14 ± 0.62     | 96.14 ± 0.62     | p=5.83e-02 n.s.   
+E6: Fine-Grained CFCA-I + Full SAHN-DCL    | 89.87 ± 0.89     | 89.86 ± 0.91     | p=0.00e+00 ***    
+----------------------------------------------------------------------------------------------------
+Significance levels: *** p < 0.001, ** p < 0.01, * p < 0.05, n.s. not significant
+
+TABLE 2: SAHN-DCL COMPONENT ABLATION LADDER
+----------------------------------------------------------------------------------------------------
+Configuration                              | Acc (%)        | Macro F1 (%)   | Δ vs Base    | McNemar p   
+----------------------------------------------------------------------------------------------------
+MFND-DCL Baseline (Paper Arch + Meta)      | 96.45 ± 0.20   | 96.45 ± 0.20   | +0.00%       | -           
+MFND-DCL Clean Baseline (No Meta)          | 88.74 ± 0.48   | 88.73 ± 0.48   | -7.72%       | 0.00e+00    
+E1: Baseline + Negative Masking Only (alpha=0) | 96.45 ± 0.20   | 96.45 ± 0.20   | +0.00%       | 1.00e+00    
+E2: E1 + SAHN Sample-Level Loss (alpha_s=1.0) | 96.43 ± 0.30   | 96.43 ± 0.30   | -0.02%       | 9.46e-01    
+E3: E1 + SAHN Modality-Level Loss (alpha_m=0.8) | 96.45 ± 0.30   | 96.45 ± 0.30   | +0.00%       | 9.47e-01    
+E4: Combined SAHN-DCL (Sample + Modal, beta=0) | 96.29 ± 0.28   | 96.29 ± 0.28   | -0.16%       | 3.16e-01    
+E5: Full SAHN-DCL + Ambiguity Proxy (beta=0.5) | 96.14 ± 0.62   | 96.14 ± 0.62   | -0.31%       | 5.83e-02    
+E6: Fine-Grained CFCA-I + Full SAHN-DCL    | 89.87 ± 0.89   | 89.86 ± 0.91   | -6.58%       | 0.00e+00    
+----------------------------------------------------------------------------------------------------
+====================================================================================================

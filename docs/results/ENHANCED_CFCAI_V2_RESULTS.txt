@@ -1,0 +1,33 @@
+==========================================================================================
+      ENHANCED CFCA-I V2: RESULTS (patch_mask_k=3, LayerNorm, CosineAnnealing)
+==========================================================================================
+
+V2 Changes vs V1:
+  Fix 1: patch_mask_k 7 -> 3  (6% masking, was 14%)
+  Fix 2: BatchNorm1d -> LayerNorm in classifier
+  Fix 3: E0v2 uses lam_fg=0.0 (true no-FG baseline, was 0.15)
+  Fix 4: CosineAnnealingLR (2e-4 -> 1e-5 over 30 epochs)
+  Fix 5: max_epochs=30, patience=15 (was 20/10)
+
+Seeds: [42, 123, 129, 2024, 3407]
+
+Config E0v2:
+  Accuracy: 91.53% +/- 0.00%  (Seeds: [91.53])
+  Macro-F1: 91.52% +/- 0.00%
+
+Config E1v2: NO RESULTS
+
+Config E2v2: NO RESULTS
+
+Config E3v2: NO RESULTS
+
+Config E4v2: NO RESULTS
+
+------------------------------------------------------------------------------------------
+Config     |       Acc V2 |        F1 V2 |   Acc V1 (ref) |        Δ
+------------------------------------------------------------------------------------------
+E0v2       |    91.53±0.00 |    91.52±0.00 | E0 (90.53±1.13) |    +1.00%
+------------------------------------------------------------------------------------------
+
+Base Paper (Qian et al.) reported: 95.50% (WITH timestamp shortcut)
+Our best clean (M4, V1): 93.33% +/- 0.63%

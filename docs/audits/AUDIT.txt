@@ -1,0 +1,55 @@
+================================================================================
+STAGE 0 AUDIT: DATA INTEGRITY & EVALUATION PROTOCOL
+Generated at: 2026-10-21 16:06:06
+================================================================================
+
+[1. Dataset Counts & Schema]
+  Train samples: 7531 (Expected: 7531)
+  Test samples:  1996 (Expected: 1996)
+  Train columns: ['post_id', 'text', 'image_path', 'label', 'timestamp']
+  Test columns:  ['post_id', 'text', 'image_path', 'label', 'timestamp']
+  Train class distribution:
+label
+0    3783
+1    3748
+  Test class distribution:
+label
+1    1000
+0     996
+  Pair-match labels present: NO (Only binary real/fake news label exists)
+
+[2. Split Overlap & Duplicate Analysis]
+  Unique train texts: 7286 / 7531
+  Unique test texts:  1930 / 1996
+  Exact text overlap between train and test: 0 samples
+  Post ID overlap between train and test: 0 samples
+
+[3. Temporal Shortcut Analysis: Hour Distribution by Label]
+  Train Real (label 0) most common hours: {14: 3783}
+  Train Fake (label 1) most common hours: {11: 248, 13: 238, 22: 234}
+  Train Real samples with hour==14: 3783 / 3783 (100.0%)
+  Train Fake samples with hour==14: 208 / 3748 (5.5%)
+  Test Real samples with hour==14: 996 / 996 (100.0%)
+  Test Fake samples with hour==14: 68 / 1000 (6.8%)
+
+[4. T0 Probe: Timestamp-Only Classifier on Weibo Test Set]
+  Features: [sin(2*pi*hour/24), cos(2*pi*hour/24)] ONLY (zero text, zero image)
+  Test Accuracy achievable solely from 2-d timestamp: 90.48%
+  Empirical Proof: Timestamp alone yields 90.48% accuracy!
+
+[5. Seed Variance & Prediction Hash Verification]
+  Model M0   : 5/5 unique prediction hashes -> PASSED (Varying)
+  Model M0a  : 5/5 unique prediction hashes -> PASSED (Varying)
+  Model M2   : 5/5 unique prediction hashes -> PASSED (Varying)
+  Model M3   : 5/5 unique prediction hashes -> PASSED (Varying)
+  Model M4   : 5/5 unique prediction hashes -> PASSED (Varying)
+  Model M5   : 5/5 unique prediction hashes -> PASSED (Varying)
+  Model M5a  : 5/5 unique prediction hashes -> PASSED (Varying)
+
+[6. Building Immutable Manifests]
+  Created weibo_train_manifest.csv: 7531 records | SHA-256: 537aa938685f302d
+  Created weibo_test_manifest.csv: 1996 records | SHA-256: c64ed02adf1a7855
+
+================================================================================
+STAGE 0 AUDIT COMPLETE: GATE G0 PASSED
+================================================================================

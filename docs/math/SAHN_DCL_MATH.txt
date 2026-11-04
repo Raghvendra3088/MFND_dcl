@@ -1,0 +1,84 @@
+================================================================================
+                    PHASE 4: SAHN-DCL MATHEMATICAL FORMULATIONS
+================================================================================
+
+1. CANDIDATE MATRIX & VALID NEGATIVE MASKING
+--------------------------------------------------------------------------------
+Given a batch of size B with normalized embeddings:
+- Sample embeddings: z_i in R^d, ||z_i||_2 = 1
+- Text embeddings: t_i in R^d, ||t_i||_2 = 1
+- Image embeddings: v_j in R^d, ||v_j||_2 = 1
+- Class labels: y_i in {0, 1}
+
+A. Sample-Level Negative Mask (M_sample):
+   Anchor i and candidate j are negative iff they belong to different rumor classes:
+   M_sample[i, j] = 1  if y_i != y_j and i != j
+   M_sample[i, j] = 0  otherwise (positives and self-diagonal excluded)
+
+B. Modality-Level Negative Mask (M_modal):
+   Anchor text t_i and candidate image v_j:
+   Known positive pair: j = i (diagonal)
+   Off-diagonal candidates: j != i
+   Valid-Negative Mask:
+   M_modal[i, j] = 1  if i != j and cosine_sim(t_i, t_j) < theta_overlap
+   (where theta_overlap = 0.85 conservatively prevents treating identical/duplicate 
+   text claims as negative images).
+
+2. SEMANTIC AMBIGUITY PROXY (A_ij)
+--------------------------------------------------------------------------------
+Cross-modal ambiguity arises when text t_i and image v_j exhibit contradictory 
+or uncertain semantic signals:
+Let s_ij = t_i^T v_j be the cosine similarity.
+The ambiguity proxy A_ij in [0, 1] is defined as:
+   A_ij = 1 - | 2 * sigmoid( (s_ij - s_mean) / sigma_s ) - 1 |
+Interpretation:
+- When s_ij is very high (strong match) or very low (clear mismatch), A_ij -> 0 (Low Ambiguity).
+- When s_ij is around the decision boundary (near s_mean), A_ij -> 1 (High Ambiguity / Confusing).
+This prevents the loss from aggressively penalizing candidates whose semantic relationship 
+is inherently uncertain.
+
+3. BOUNDED HARD-NEGATIVE WEIGHTING (W_ij)
+--------------------------------------------------------------------------------
+Ordinary negatives with low similarity are easy to classify. Negatives with higher 
+similarity are informative, but if they are ambiguous (A_ij high), blindly amplifying 
+them causes latent distortion.
+
+We define the bounded weight for candidate negative j of anchor i:
+   H_ij = max(0, s_ij)   (Hardness score: only positive similarities are hard)
+   W_ij = 1.0 + alpha * H_ij * (1.0 - beta * A_ij)
+
+Bounds:
+   alpha in [0.5, 1.5] (scaling factor)
+   beta in [0.0, 1.0] (ambiguity suppression factor)
+   W_ij is strictly clamped: W_ij in [1.0, 1.0 + alpha] (Bounded!)
+
+4. MODIFIED SAHN-DCL LOSS EQUATIONS
+--------------------------------------------------------------------------------
+A. SAHN Sample-Level Contrastive Loss:
+For anchor i with positive set P(i) = {p | y_p = y_i, p != i}:
+   S_ij = (z_i^T z_j) / tau_s
+   S_ij_weighted = S_ij + log(W_ij) * M_sample[i, j]
+   
+   log_P_ip = S_ip - logsumexp_{k != i}( S_ik_weighted )
+   L_SAHN_sample = - (1 / |P(i)|) * sum_{p in P(i)} log_P_ip
+
+Empty Negative Handling:
+If row i has no valid negatives (M_sample[i].sum() == 0), row i contributes 0 to the loss.
+
+B. SAHN Modality-Level Consistency Loss:
+For paired text t_i and image v_i:
+   Logits_ti[i, j] = (t_i^T v_j) / tau_m
+   Logits_weighted[i, j] = Logits_ti[i, j] + log(W_ij) * M_modal[i, j]
+   
+   L_t_to_v = CrossEntropy(Logits_weighted, target=diag_indices)
+   L_v_to_t = CrossEntropy(Logits_weighted.T, target=diag_indices)
+   L_SAHN_modal = 0.5 * (L_t_to_v + L_v_to_t)
+
+5. NUMERICAL STABILITY GUARANTEES
+--------------------------------------------------------------------------------
+- Features normalized with eps=1e-8.
+- Logits clamped between [-50.0, 50.0] before logsumexp to avoid inf/nan.
+- Weight log(W_ij) is bounded because W_ij in [1.0, 2.5], so log(W_ij) in [0.0, 0.916].
+- Temperature tau is clamped: tau in [0.05, 1.0].
+- When alpha=0, W_ij = 1.0, log(W_ij) = 0.0, which EXACTLY reproduces baseline loss!
+================================================================================

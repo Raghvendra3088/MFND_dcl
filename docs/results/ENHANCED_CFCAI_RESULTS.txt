@@ -1,0 +1,29 @@
+=========================================================================================
+      ENHANCED CFCA-I: MULTI-SCALE POOLING + DEEP ENSEMBLE + AUGMENTATION RESULTS
+=========================================================================================
+
+Config E0:
+  Accuracy: 90.53% +/- 1.13%  (Individual seeds: [89.83, 91.23, 89.88, 92.18, 89.53])
+  Macro-F1: 90.51% +/- 1.15%
+
+Config E1:
+  Accuracy: 92.21% +/- 1.06%  (Individual seeds: [91.28, 93.24, 91.08, 92.13, 93.34])
+  Macro-F1: 92.21% +/- 1.06%
+
+Config E2:
+  Accuracy: 92.51% +/- 0.41%  (Individual seeds: [92.08, 93.04, 92.23, 92.33, 92.84])
+  Macro-F1: 92.50% +/- 0.42%
+
+Config E3:
+  Accuracy: 92.71% +/- 0.61%  (Individual seeds: [92.89, 93.34, 93.09, 91.78, 92.43])
+  Macro-F1: 92.70% +/- 0.61%
+
+Config E4:
+  Accuracy: 93.13% +/- 1.41%  (Individual seeds: [90.68, 93.94, 93.14, 94.04, 93.84])
+  Macro-F1: 93.13% +/- 1.41%
+
+Paired Statistical Test (E0 vs Full Enhanced E4 across 9,980 predictions):
+  E0 Correct / E4 Wrong: 245
+  E0 Wrong / E4 Correct: 504
+  Exact Binomial p-value: 1.6749e-21
+=========================================================================================

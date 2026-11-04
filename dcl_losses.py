@@ -1,101 +1,163 @@
-"""
-dcl_losses.py
-=============
-Dual Contrastive Learning losses, Section 3.5.
-
-1. Sample-level contrastive loss (Sec 3.5.1, Eq. 6-8) -- a standard
-   supervised contrastive (SupCon) loss operating on the fused
-   sample-level representation z_s, pulling same-label samples together
-   and pushing different-label samples apart.
-
-2. Modal-level contrastive loss (Sec 3.5.2, Eq. 9-11) -- symmetric InfoNCE
-   between the text and image projections of the SAME post (positive pair
-   = matching text/image from the same post; negatives = all other
-   text/image pairs in the batch), i.e. a CLIP-style contrastive loss
-   applied post-fusion.
-"""
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import math
 
-
-class SampleContrastiveLoss(nn.Module):
-    """Supervised contrastive loss, Eq. 6-8.
-
-    L_sample = -(1/|B|) * sum_{i in B} (1/|P(i)|) *
-                    sum_{p in P(i)} log( exp(s_ip) / sum_{k!=i} exp(s_ik) )
-
-    where B = {i : |P(i)| > 0} ensures every anchor has >=1 positive in the
-    batch, s_ij = (z_i . z_j) / tau is the temperature-scaled cosine
-    similarity of L2-normalized sample representations, and P(i) is the set
-    of same-label samples (excluding i itself).
-    """
-
-    def __init__(self, temperature=0.2):
+class SupConLoss(nn.Module):
+    def __init__(
+        self,
+        temperature=0.2,
+        hard_negative_k=5,
+        hard_negative_weight=1.5,
+        min_temperature=0.05,
+        max_temperature=1.0,
+        learnable_temp=True
+    ):
         super().__init__()
-        self.tau = temperature
+        self.hard_negative_k = hard_negative_k
+        self.hard_negative_weight = hard_negative_weight
+        self.min_temperature = min_temperature
+        self.max_temperature = max_temperature
+        self.learnable_temp = learnable_temp
+        
+        if learnable_temp:
+            initial_value = (temperature - min_temperature) / (max_temperature - min_temperature)
+            initial_value = min(max(initial_value, 0.01), 0.99)
+            initial_logit = math.log(initial_value / (1 - initial_value))
+            self.temperature_logit = nn.Parameter(torch.tensor(initial_logit, dtype=torch.float32))
+        else:
+            self.register_buffer("fixed_temperature", torch.tensor(temperature, dtype=torch.float32))
 
-    def forward(self, z_sample, labels):
-        # z_sample: [N, dp] (unnormalized projection-head output)
-        # labels:   [N] integer class labels
-        device = z_sample.device
-        N = z_sample.size(0)
+    def get_temperature(self):
+        if not self.learnable_temp:
+            return self.fixed_temperature
+        # Clamp logit to prevent extreme temperature values and nan gradients
+        logit = torch.clamp(self.temperature_logit, min=-10.0, max=10.0)
+        temperature = self.min_temperature + (self.max_temperature - self.min_temperature) * torch.sigmoid(logit)
+        return temperature
 
-        z = F.normalize(z_sample, dim=-1)               # Eq. 6, L2 normalization
-        sim = torch.matmul(z, z.T) / self.tau            # Eq. 7, s_ij
-
-        # mask out self-similarity (k != i) in the denominator
-        self_mask = torch.eye(N, dtype=torch.bool, device=device)
-        sim_masked = sim.masked_fill(self_mask, float("-inf"))
-        log_denom = torch.logsumexp(sim_masked, dim=1)   # log sum_{k!=i} exp(s_ik)
-
+    def forward(self, features, labels):
+        batch_size = features.shape[0]
+        # Epsilon to prevent div by zero in norm
+        features = nn.functional.normalize(features, p=2, dim=1, eps=1e-8)
         labels = labels.view(-1, 1)
-        same_label = (labels == labels.T)                # [N, N] boolean
-        positive_mask = same_label & (~self_mask)         # P(i): same label, excl. self
+        
+        positive_mask = torch.eq(labels, labels.T).float()
+        identity_mask = torch.eye(batch_size, device=features.device)
+        positive_mask = positive_mask - identity_mask
+        negative_mask = (1.0 - positive_mask - identity_mask).clamp(min=0.0)
+        
+        temperature = self.get_temperature()
+        similarity = torch.matmul(features, features.T) / temperature
+        # Clamp similarity to prevent extreme values and NaN in backward pass
+        similarity = torch.clamp(similarity, min=-50.0, max=50.0)
+        similarity = similarity.masked_fill(identity_mask.bool(), -1e4)
 
-        has_positive = positive_mask.sum(dim=1) > 0        # B = {i : |P(i)| > 0}
-        if has_positive.sum() == 0:
-            return torch.tensor(0.0, device=device, requires_grad=True)
+        # Mismatch-Aware Hard-negative selection (Vectorized)
+        masked_similarity = similarity.masked_fill(negative_mask == 0, -1e4)
+        
+        valid_k = min(self.hard_negative_k, batch_size - 1)
+        if valid_k > 0:
+            top_scores, top_indices = torch.topk(masked_similarity, k=valid_k, dim=1)
+            hard_negative_mask = torch.zeros_like(negative_mask)
+            hard_negative_mask.scatter_(1, top_indices, 1.0)
+            
+            # NOVELTY FIX: Only apply hard negative weighting if confusing (similarity > 0)
+            confusing_mask = (similarity > 0.0).float()
+            hard_negative_mask = hard_negative_mask * confusing_mask
+        else:
+            hard_negative_mask = torch.zeros_like(negative_mask)
 
-        # log p_ip = s_ip - log_denom_i  for every positive p of anchor i
-        log_prob = sim - log_denom.unsqueeze(1)            # [N, N]
-        pos_log_prob = (log_prob * positive_mask.float()).sum(dim=1)
-        num_positives = positive_mask.sum(dim=1).clamp(min=1).float()
-        mean_log_prob_pos = pos_log_prob / num_positives    # (1/|P(i)|) sum_p log p_ip
+        # Increase hard-negative importance safely
+        log_weight = math.log(self.hard_negative_weight)
+        weighted_similarity = similarity + (hard_negative_mask * log_weight)
 
-        loss_per_anchor = -mean_log_prob_pos[has_positive]
-        loss = loss_per_anchor.mean()                       # average over B
+        log_prob = (
+            weighted_similarity - torch.logsumexp(weighted_similarity, dim=1, keepdim=True)
+        )
+
+        positive_count = positive_mask.sum(dim=1)
+        valid_samples = positive_count > 0
+
+        if not valid_samples.any():
+            return features.sum() * 0.0
+
+        mean_log_prob = (positive_mask * log_prob).sum(dim=1)[valid_samples] / (positive_count[valid_samples] + 1e-8)
+        loss = -mean_log_prob.mean()
         return loss
 
-
-class ModalContrastiveLoss(nn.Module):
-    """Symmetric cross-modal InfoNCE loss, Eq. 9-11.
-
-    Builds text->image similarity matrix S_t2v[m,n] = (z_t^m . z_v^n) / tau_m
-    and computes two InfoNCE losses treating the diagonal as positives:
-        L_t2v: text m must match its own image m among all images in batch
-        L_v2t: image n must match its own text n among all texts in batch
-    L_modal = (L_t2v + L_v2t) / 2
-    """
-
-    def __init__(self, temperature=0.2):
+class MultimodalConsistencyLoss(nn.Module):
+    def __init__(
+        self,
+        temperature=0.1,
+        hard_negative_k=5,
+        hard_negative_weight=1.5,
+        min_temperature=0.05,
+        max_temperature=1.0,
+        learnable_temp=True
+    ):
         super().__init__()
-        self.tau = temperature
+        self.hard_negative_k = hard_negative_k
+        self.hard_negative_weight = hard_negative_weight
+        self.min_temperature = min_temperature
+        self.max_temperature = max_temperature
+        self.learnable_temp = learnable_temp
+        
+        if learnable_temp:
+            initial_value = (temperature - min_temperature) / (max_temperature - min_temperature)
+            initial_value = min(max(initial_value, 0.01), 0.99)
+            initial_logit = math.log(initial_value / (1 - initial_value))
+            self.temperature_logit = nn.Parameter(torch.tensor(initial_logit, dtype=torch.float32))
+        else:
+            self.register_buffer("fixed_temperature", torch.tensor(temperature, dtype=torch.float32))
+        self.loss_fn = nn.CrossEntropyLoss()
 
-    def forward(self, z_text, z_image):
-        # z_text, z_image: [N, dp], paired by row index (same post)
-        device = z_text.device
-        N = z_text.size(0)
+    def get_temperature(self):
+        if not self.learnable_temp:
+            return self.fixed_temperature
+        logit = torch.clamp(self.temperature_logit, min=-10.0, max=10.0)
+        temperature = self.min_temperature + (self.max_temperature - self.min_temperature) * torch.sigmoid(logit)
+        return temperature
 
-        z_t = F.normalize(z_text, dim=-1)
-        z_v = F.normalize(z_image, dim=-1)
+    def apply_hard_negative_weight(self, logits):
+        batch_size = logits.shape[0]
+        identity_mask = torch.eye(batch_size, device=logits.device)
+        negative_mask = 1.0 - identity_mask
+        masked_logits = logits.masked_fill(negative_mask == 0, -1e4)
+        
+        valid_k = min(self.hard_negative_k, batch_size - 1)
+        if valid_k > 0:
+            top_scores, top_indices = torch.topk(masked_logits, k=valid_k, dim=1)
+            hard_negative_mask = torch.zeros_like(negative_mask)
+            hard_negative_mask.scatter_(1, top_indices, 1.0)
+            
+            # NOVELTY FIX: Only penalize if confusing (cross-modal similarity > 0)
+            confusing_mask = (logits > 0.0).float()
+            hard_negative_mask = hard_negative_mask * confusing_mask
+        else:
+            hard_negative_mask = torch.zeros_like(negative_mask)
+            
+        log_weight = math.log(self.hard_negative_weight)
+        logits = logits + (hard_negative_mask * log_weight)
+        return logits
 
-        logits_t2v = torch.matmul(z_t, z_v.T) / self.tau   # [N, N], S_t2v
-        targets = torch.arange(N, device=device)
-
-        loss_t2v = F.cross_entropy(logits_t2v, targets)     # Eq. 9
-        loss_v2t = F.cross_entropy(logits_t2v.T, targets)    # Eq. 10 (symmetric)
-
-        loss = 0.5 * (loss_t2v + loss_v2t)                   # Eq. 11
-        return loss
+    def forward(self, text_features, image_features):
+        text_features = nn.functional.normalize(text_features, p=2, dim=1, eps=1e-8)
+        image_features = nn.functional.normalize(image_features, p=2, dim=1, eps=1e-8)
+        
+        temperature = self.get_temperature()
+        logits_ti = torch.matmul(text_features, image_features.T) / temperature
+        logits_it = torch.matmul(image_features, text_features.T) / temperature
+        
+        logits_ti = torch.clamp(logits_ti, min=-50.0, max=50.0)
+        logits_it = torch.clamp(logits_it, min=-50.0, max=50.0)
+        
+        logits_ti = self.apply_hard_negative_weight(logits_ti)
+        logits_it = self.apply_hard_negative_weight(logits_it)
+        
+        batch_size = text_features.shape[0]
+        labels = torch.arange(batch_size, device=text_features.device)
+        
+        loss_t_i = self.loss_fn(logits_ti, labels)
+        loss_i_t = self.loss_fn(logits_it, labels)
+        
+        return (loss_t_i + loss_i_t) / 2

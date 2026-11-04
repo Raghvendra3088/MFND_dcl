@@ -55,13 +55,16 @@ class BaseConfig:
     lambda_modal = 0.3        # weight on modal-level (cross-modal InfoNCE) loss, Eq. 12
     tau = 0.2                 # contrastive temperature -- see note above (paper text says
                                # 0.1 but the reported main results correspond to 0.2)
+    hard_negative_k = 5
+    hard_negative_weight = 1.5
+    min_temperature = 0.05
+    max_temperature = 1.0
 
     # ---- Training (shared) ----
     max_epochs = 100          # Sec 4.4
     early_stopping_metric = "val_f1"
-    early_stopping_patience = 10  # not stated numerically in the paper beyond
+    early_stopping_patience = 15  # Matched from author's GitHub
                                    # "training terminated when val F1 ceases to improve";
-                                   # 10 is a reasonable, commonly-used default -- tune if needed
     optimizer = "adam"
     grad_clip_norm = 1.0      # "gradient clipping applied to stabilize training" (Sec 4.4)
 
@@ -71,6 +74,13 @@ class BaseConfig:
 class WeiboConfig(BaseConfig):
     dataset_name = "weibo"
     language = "zh"
+    
+    # Override dimensions for the 1026-dim ViT-H-14 + Time feature architecture
+    clip_text_dim = 1026
+    clip_image_dim = 1026
+    d_model = 1026
+    d_k = 1026
+    
     batch_size = 128
     lr = 1e-4
     classifier_dropout = 0.3

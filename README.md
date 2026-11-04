@@ -37,7 +37,7 @@ CFCA-I transitions multimodal fake news detection from coarse global representat
 
 ### 4 Core Architectural Pillars:
 
-1. **Dual Bottleneck & Gated Cross-Attention (CA):**
+1. **Dual Bottleneck & Gated Cross-Attention (GCA):**
    * Projects 1024-d Chinese-CLIP text tokens ($L=64$) and image patch tokens ($7 \times 7 = 49$) through dimensionality reduction bottlenecks ($1024 \to 512 \to 128$).
    * Bi-directional gated cross-attention allows words to attend to visual regions and image regions to query linguistic claims, regulated by learnable gate parameters $g_i \in [0, 1]$.
 
